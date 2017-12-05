@@ -1,42 +1,61 @@
 #! /usr/bin/env python
 
 import sys
-from ROOT import gROOT, gStyle, sqrt, Double
-from ROOT import TFile, TIter, TH1F, TDirectory, TMath, TCanvas, TLegend
+#from ROOT import gROOT, gStyle, sqrt, Double
+#from ROOT import TFile, TIter, TH1F, TDirectory, TMath, TCanvas, TLegend
+from FWCore.ParameterSet.VarParsing import VarParsing
+from ROOT import *
+from math import sqrt
 gROOT.Macro("~/rootlogon.C")
 gStyle.SetOptStat(0)
 
-var = st
+options = VarParsing('analysis')
+options.register('var', 'resReco_bZ_1b',
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    'Variable name'
+    )
+options.register('path', '',
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    'path to root files'
+    )
+options.register('fileName', 'ttbar.root',
+    VarParsing.multiplicity.singleton,
+    VarParsing.varType.string,
+    'name of root file',
+    )
+options.parseArguments()
+path = options.path
+fileName = options.fileName
+var = options.var
 
-path = '/uscms_data/d3/tmitchel/76X_test/CMSSW_7_6_5/src/Analysis/VLQAna/test/Macro/Histograms/withSystematics/muons/'
+f = TFile(path+fileName)
 
-f_ttbar = TFile(path+'ttbar.root')
+h_nom = f.Get('massReco/'+var).Clone()
+h_bUp = f.Get('recobc__plus/'+var).Clone()
+h_bDown = f.Get('recobc__minus/'+var).Clone()
+h_lUp = f.Get('recolight__plus/'+var).Clone()
+h_lDown = f.Get('recolight__minus/'+var).Clone()
 
-h_nom = f_ttbar.Get('ana/sig/'+var).Clone()
-h_bUp = f_ttbar.Get('anabcUp/sig/'+var).Clone()
-h_bDown = f_ttbar.Get('anabcDown/sig/'+var).Clone()
-h_lUp = f_ttbar.Get('analightUp/sig/'+var).Clone()
-h_lDown = f_ttbar.Get('analightDown/sig/'+var).Clone()
-
-h_dn_hf_diff = h_bUp.Clone()
-h_dn_lf_diff = h_bDown.Clone()
-h_up_hf_diff = h_lUp.Clone()
-h_up_lf_diff = h_lDown.Clone()
-h_dn_hf_diff.Add(h_bUp, -1)
-h_dn_lf_diff.Add(h_bDown, -1)
-h_up_hf_diff.Add(h_lUp, -1)
-h_up_lf_diff.Add(h_lDown, -1)
-
-hs_dn_new = hist_dn_hf[i].Clone()
+hs_dn_new = h_bDown.Clone()
 hs_dn_new.Reset()
 hs_dn_new.SetDirectory(0)
-hs_up_new = hist_up_hf[i].Clone()
-hs_up_new.Reset()
+hs_up_new = h_bUp.Clone()
+hs_up_new.Reset() 
 hs_up_new.SetDirectory(0)
 
+h_up_hf_diff = h_bUp.Clone()
+h_dn_hf_diff = h_bDown.Clone()
+h_up_lf_diff = h_lUp.Clone()
+h_dn_lf_diff = h_lDown.Clone()
+h_dn_hf_diff.Add(h_nom, -1)
+h_dn_lf_diff.Add(h_nom, -1)
+h_up_hf_diff.Add(h_nom, -1)
+h_up_lf_diff.Add(h_nom, -1)
+
+nbins = h_nom.GetNbinsX()
 for ibin in range(0, nbins+1):
-    sumErrUp2 = 0
-    sumErrDn2 = 0
 
     var_dn_hf = h_dn_hf_diff.GetBinContent(ibin+1)
     var_dn_lf = h_dn_lf_diff.GetBinContent(ibin+1)
@@ -59,29 +78,18 @@ for ibin in range(0, nbins+1):
     hs_up_new.SetBinContent(ibin+1, h_nom.GetBinContent(ibin+1) + bin_up_var)
     hs_dn_new.SetBinContent(ibin+1, h_nom.GetBinContent(ibin+1) - bin_dn_var)
 
-hist_up_new.insert(i,hs_up_new)
-hist_dn_new.insert(i,hs_dn_new)
+print fileName
+print hs_up_new.Integral(), hs_dn_new.Integral()
 
-###write two output root file:
-f_dn = TFile(path+var+"_BTagSFdown.root", "RECREATE")
-f_dn.cd()
-hist_dn_new.Write()
-f_dn.Close()
+hs_dn_new.SetName(var+'__BTagSF__minus')
+hs_up_new.SetName(var+'__BTagSF__plus')
 
-f_up = TFile(path+var+"_BTagSFup.root", "RECREATE")
-f_up.cd()
-hist_up_new.Write()
-f_up.Close()
-
+fout = TFile(fileName.split('.')[0]+'_'+options.var+'_BTagSF.root', 'recreate')
+fout.cd()
+hs_up_new.Write()
+hs_dn_new.Write()
+fout.Close()
     
-# for i in range(0, len(h_nom)):
-    
-#     hs_dn_new = hist_dn_hf[i].Clone()
-#     hs_dn_new.Reset()
-#     hs_dn_new.SetDirectory(0)
-#     hs_up_new = hist_up_hf[i].Clone()
-#     hs_up_new.Reset()
-#     hs_up_new.SetDirectory(0)
 
     
     
