@@ -18,7 +18,7 @@ parser.add_option('-o', '--output', action='store',
                   help='name of output file'
                   )
 parser.add_option('-r', '--rebin', action='store',
-                  dest='rebin', default='1',
+                  dest='rebin', default='1', type=int,
                   help='rebin the distribution'
                   )
 parser.add_option('-l', '--lepton', action='store',
@@ -32,6 +32,18 @@ parser.add_option('-s', '--syst', action='store_true',
 parser.add_option('-g', '--signal', action='store',
                   dest='signal', default='1200_bZbZ',
                   help='channel and mass point of signal'
+                  )
+parser.add_option('--verbose', action='store_true',
+                  dest='verbose', default=False,
+                  help='run in verbose mode'
+                  )
+parser.add_option('-p', '--printCount', action='store_true',
+                  dest='printCount', default=False,
+                  help='print event yields with uncertainty'
+                  )
+parser.add_option('-t', '--scaleTop', action='store',
+                  dest='scaleTop', default=1, type=float,
+                  help='amount to scale top of canvas'
                   )
 (options, args) = parser.parse_args()
 
@@ -47,6 +59,9 @@ rebin = options.rebin
 lepton = options.lepton
 prefix = ''
 signal = options.signal
+verbose = options.verbose
+
+print var
 
 if 'boost' in var:
     prefix = options.lepton+'_Boost'
@@ -74,6 +89,19 @@ if 'Reco' in var:
     title = 'M_{#chi^{2}} [GeV]'
 elif 'st_':
     title = 'S_{T} [GeV]'
+
+def getPoissonUnc(n,weight):
+    alpha = 1 - 0.6827
+    if n==0: l = 0
+    else: l = Math.gamma_quantile(alpha/2,n,1.)
+    u = Math.gamma_quantile_c(alpha/2,n+1,1) ;
+    #print 'lower quant', l, 'nominal', n, 'high quant', u
+    if n > 0:
+        l_err = (n-l); u_err = (u-n);
+    else: l_err = l; u_err = u
+    #if n < 3.0: l_err = l_err*weight; u_err = u_err*weight
+    #print 'lower error', l_err, 'nominal', n, 'high error', u_err
+    return (l_err*weight, u_err*weight)
 
 #####################################################
 ## format TCanvas for plotting histogram with pull ##
@@ -119,9 +147,10 @@ def passed(name, lep, syst=None):
 #########################################################################
 def formatHistograms(samples):
     stack = THStack()
-    data = None
+    data = None 
     stat = samples['nominal'][0].Clone()
     stat.Reset()
+    stat.SetBinErrorOption(TH1.kPoisson)
     for ihist in samples['nominal']:
         ihist.SetBinErrorOption(TH1.kPoisson)
         if 'DATA' in ihist.GetName():
@@ -169,7 +198,7 @@ def formatSystematics(samples, stat):
     ## make list of histogram clones for each systematic
     hists = []
     for ikey in samples.keys():
-        if len(samples[ikey]) == 0 or ikey == 'nominal':
+        if ikey == 'nominal' or len(samples[ikey]) == 0:
             continue
         temp_up = samples[ikey][0].Clone()
         temp_dn = samples[ikey][0].Clone()
@@ -179,53 +208,119 @@ def formatSystematics(samples, stat):
         temp_dn.SetName(ikey+'__minus')
         hists.append(temp_up)
         hists.append(temp_dn)
-
-    ## clone histograms to hold total syst. unc.
-    total_up = hists[0].Clone()
-    total_up.Reset()
+    
     total_dn = hists[0].Clone()
     total_dn.Reset()
+    total_up = stat.Clone()
+
+    if options.printCount:
+        dy_plus   = total_up.Clone()
+        dy_minus  = total_up.Clone()
+        top_plus  = total_up.Clone()
+        top_minus = total_up.Clone()
+        vv_plus   = total_up.Clone()
+        vv_minus  = total_up.Clone()
+
+        dy_fin = samples['nominal'][2].Clone()
+        top_fin = samples['nominal'][1].Clone()
+        vv_fin = samples['nominal'][0].Clone()
+
+    if verbose:
+        pprint(samples)
 
     for ibin in range(hists[0].GetNbinsX()):
-        print 'bin: ', ibin+1
+        sumUp2 = 0; sumDown2 = 0
+        sumDYUp2 = 0; sumDYDown2 = 0
+        sumTopUp2 = 0; sumTopDown2 = 0
+        sumVVUp2 = 0; sumVVDown2 = 0
         for ihist in hists: ## loop through all systematic uncertainties
-            contentUp = 0; contentDown = 0
+            # print ihist.GetName()
             sumUp = 0; sumDown = 0
-            sumUp2 = 0; sumDown2 = 0
+            contentUp = 0; contentDown = 0
+            dyUp = 0; dyDown = 0
+            topUp = 0; topDown = 0
+            vvUp = 0; vvDown = 0
+            if 'minus' in ihist.GetName():
+                continue
             for syst in samples[ihist.GetName().split('__')[0]]: ## loop through samples for a single systematic
+                if 'pdf' in syst.GetName() or 'scale' in syst.GetName():
+                    vvUp = samples['nominal'][0].GetBinContent(ibin+1)
+                    vvDown = samples['nominal'][0].GetBinContent(ibin+1)
+
                 if 'plus' in syst.GetName():
                     contentUp += syst.GetBinContent(ibin+1)
+                    if 'DY' in syst.GetName():
+                        dyUp = syst.GetBinContent(ibin+1)
+                    if 'Top' in syst.GetName():
+                        topUp = syst.GetBinContent(ibin+1)
+                    if 'VV' in syst.GetName():
+                        vvUp = syst.GetBinContent(ibin+1)
                 elif 'minus' in syst.GetName():
                     contentDown += syst.GetBinContent(ibin+1)
+                    if 'DY' in syst.GetName():
+                        dyDown = syst.GetBinContent(ibin+1)
+                    if 'Top' in syst.GetName():
+                        topDown = syst.GetBinContent(ibin+1)
+                    if 'VV' in syst.GetName():
+                        vvDown = syst.GetBinContent(ibin+1)
                 else:
                     print syst.GetName()
-            sumUp += max(contentUp - stat.GetBinContent(ibin+1), contentDown - stat.GetBinContent(ibin+1)) ## max diff. in this bin
-            sumDown += min(contentUp - stat.GetBinContent(ibin+1), contentDown - stat.GetBinContent(ibin+1)) ## min diff. in this bin
-            print 'sys: {0:5}, max up = {1:5.2f}, max dn = {2:5.2f}'.format(ihist.GetName(), sumUp, sumDown)
 
+            if 'pdf' in ihist.GetName() or 'scale' in ihist.GetName():
+                contentUp += samples['nominal'][0].GetBinContent(ibin+1)
+                contentDown += samples['nominal'][0].GetBinContent(ibin+1)
+
+            sumUp = max(abs(contentUp - stat.GetBinContent(ibin+1)), abs(contentDown - stat.GetBinContent(ibin+1))) ## max diff. in this bin
             sumUp2 += pow(sumUp, 2)
-            sumDown2 += pow(sumDown, 2)
 
-            ## set content of individual syst. histograms
-            if 'plus' in ihist.GetName():
-                ihist.SetBinContent(ibin+1, math.sqrt(sumUp2))
-            elif 'minus' in ihist.GetName():
-                ihist.SetBinContent(ibin+1, math.sqrt(sumDown2))
+            if verbose:
+                print 'sys: {0:5}, max up = {1:5.2f}, max dn = {2:5.2f}'.format(ihist.GetName(), sumUp, sumDown)
 
-        print 'total unc up = {0:5.2f}, total unc dn = {1:5.2f},'.format(TMath.Sqrt(sumUp2), TMath.Sqrt(sumDown2))
+            if options.printCount:
+                sumDYUp2    += pow(max(abs(dyUp  - samples['nominal'][2].GetBinContent(ibin+1)), abs(dyDown  - samples['nominal'][2].GetBinContent(ibin+1))), 2)
+                sumTopUp2   += pow(max(abs(topUp - samples['nominal'][1].GetBinContent(ibin+1)), abs(topDown - samples['nominal'][1].GetBinContent(ibin+1))), 2)
+                sumVVUp2    += pow(max(abs(vvUp  - samples['nominal'][0].GetBinContent(ibin+1)), abs(vvDown  - samples['nominal'][0].GetBinContent(ibin+1))), 2)
 
-        iDY  = samples['nominal'][0].GetBinContent(ibin+1)
-        iTop = samples['nominal'][1].GetBinContent(ibin+1)
-        iVV  = samples['nominal'][2].GetBinContent(ibin+1)
+        if verbose:
+            print 'total unc up = {0:5.2f}, total unc dn = {1:5.2f},'.format(TMath.Sqrt(sumUp2), TMath.Sqrt(sumDown2))
+
+        iDY, statDY  = samples['nominal'][2].GetBinContent(ibin+1), samples['nominal'][2].GetBinErrorUp(ibin+1)
+        iTop, statTop  = samples['nominal'][1].GetBinContent(ibin+1), samples['nominal'][1].GetBinErrorUp(ibin+1)
+        iVV, statVV  = samples['nominal'][0].GetBinContent(ibin+1), samples['nominal'][0].GetBinErrorUp(ibin+1)
 
         ## add normalization uncertainty per bin
-        norm_unc = pow(lumi_err, 2)+pow(id_err, 2)+pow(trig_err, 2)+pow(iDY*dy_err, 2)+pow(iTop*top_err, 2)+pow(iVV, vv_err)
+        norm_unc = pow(lumi_err, 2)+pow(id_err, 2)+pow(trig_err, 2)\
+                   +pow(iDY*dy_err, 2)+pow(iTop*top_err, 2)+pow(iVV*vv_err, 2)\
+                   +pow(statDY, 2)+pow(statTop, 2)+pow(statVV, 2)
         sumUp2 += norm_unc
-        sumDown2 += norm_unc
 
         ## set content of total syst. histograms
-        total_up.SetBinContent(ibin+1, sumUp2)
-        total_dn.SetBinContent(ibin+1, sumDown2)
+        total_up.SetBinError(ibin+1, TMath.Sqrt(sumUp2))
+
+        if options.printCount:
+            dy_unc  = pow(lumi_err, 2)+pow(id_err, 2)+pow(trig_err, 2)+pow(iDY*dy_err, 2)+pow(statDY, 2)
+            top_unc = pow(lumi_err, 2)+pow(id_err, 2)+pow(trig_err, 2)+pow(iTop*top_err, 2)+pow(statTop, 2)
+            vv_unc  = pow(lumi_err, 2)+pow(id_err, 2)+pow(trig_err, 2)+pow(iVV*vv_err, 2)+pow(statVV, 2)
+            sumDYUp2    += dy_unc
+            sumTopUp2   += top_unc
+            sumVVUp2    += vv_unc
+
+            dy_fin.SetBinError(ibin+1, TMath.Sqrt(sumDYUp2))
+            top_fin.SetBinError(ibin+1, TMath.Sqrt(sumTopUp2))
+            vv_fin.SetBinError(ibin+1, TMath.Sqrt(sumVVUp2))
+
+    if options.printCount:
+        err = Double(0.)
+        print 'dy count %2.2f +/- %2.2f' % (dy_fin.IntegralAndError(0, dy_fin.GetNbinsX(), err), err)
+        print 'top count %2.2f +/- %2.2f' % (top_fin.IntegralAndError(0, top_fin.GetNbinsX(), err), err)
+        print 'vv count %2.2f +/- %2.2f' % (vv_fin.IntegralAndError(0, vv_fin.GetNbinsX(), err), err)
+
+        data_err = Double(0.)
+        print 'data count %2.2f +/- %2.2f' % (data_hist.IntegralAndError(0, data_hist.GetNbinsX(), data_err), data_err)
+        # for ibin in range(data_hist.GetNbinsX()+1):
+            # data_err += pow(data_hist.GetBinErrorUp(ibin),2)
+
+        # print 'data count %2.2f +/- %2.2f' % (data_hist.Integral(), TMath.Sqrt(data_err))
 
     return hists, total_up, total_dn
 
@@ -233,7 +328,7 @@ def formatSystematics(samples, stat):
 if 'dil' in lepton:
     fin = TFile('templates/template_'+var+'.root', 'read')
 else:
-    fin = TFile('templates/forPlots/EMu_'+var+'.root', 'read')
+    fin = TFile('templates/EMu_'+var+'.root', 'read')
 
 ## add systematics to all histogram dictionary if flagged
 if options.syst:
@@ -249,7 +344,7 @@ allHist['nominal'] = sorted(allHist['nominal'], key=lambda hist: hist.Integral()
 
 data_hist, bkg_stack, stat = formatHistograms(allHist) ## do general formatting on data, stack, stat. unc. histos
 if options.syst:
-    syst_plot, fullUp, fullDn = formatSystematics(allHist, stat) ## do general formatting on syst. plots if flagged
+    syst_plot, final_err, fullDn = formatSystematics(allHist, stat) ## do general formatting on syst. plots if flagged
 
 ## create and format the canvas
 can = TCanvas('can', 'can', 800, 600)
@@ -257,25 +352,28 @@ formatCanvas(can)
 
 ## get the signal histogram
 sig_hist = fin.Get(prefix+'__BpBp'+signal).Clone()
+sig_hist.SetBinErrorOption(TH1.kPoisson)
 if lepton == 'dil':
-    sig_hist.Scale(0.0118*10)
+    sig_hist.Scale(0.044)
 else:
-    sig_hist.Scale(0.0118*10) ## scaled for 10x cross section of 1200 GeV for now (need to generalize)
+    sig_hist.Scale(0.044*10) ## scaled for 10x cross section of 1000 GeV for now (need to generalize)
 
+scaled_sig = sig_hist.Clone()
+scaled_sig.Scale(.1)
 ###############################
-## final uncertainty to plot ##
+## Print total bkg/sig error ##
 ###############################
-final_err = stat.Clone()
-for ibin in range(final_err.GetNbinsX()):
-    up = fullUp.GetBinContent(ibin+1)
-    dn = fullDn.GetBinContent(ibin+1)
-    final_err.SetBinError(ibin+1, max(up, dn))
+full_err, sig_err = Double(0.), Double(0.)
+print 'total bkg %2.2f +/- %2.2f' % (final_err.IntegralAndError(0, final_err.GetNbinsX()+1, full_err), full_err)
+print 'signal %2.2f +/- %2.2f' % (scaled_sig.IntegralAndError(0, scaled_sig.GetNbinsX()+1, sig_err), sig_err)
+print ''
 
 ####################################
 ## format the last few histograms ##
 ## (stack, signal and final unc.) ##
 ####################################    
-bkg_stack.SetMaximum(bkg_stack.GetMaximum()*6.9)
+bkg_stack.SetMaximum(bkg_stack.GetMaximum()*options.scaleTop)
+bkg_stack.SetMinimum(0)
 bkg_stack.Draw('hist')
 if  'Reco' in var:
     bkg_stack.GetXaxis().SetRangeUser(0, 2500)
@@ -295,7 +393,6 @@ sig_hist.SetLineWidth(2)
 sig_hist.SetLineColor(kCyan)
 # sig_hist.GetXaxis().SetRangeUser(1000, 3800)
 
-
 final_err.SetMarkerStyle(0)
 final_err.SetLineWidth(2)
 final_err.SetFillColor(kRed)
@@ -309,7 +406,7 @@ final_err.SetFillStyle(3005)
 final_err.Draw('same e2')
 stat.Draw('same e2')
 sig_hist.Draw('same hist')
-data_hist.Draw('le1p same')
+data_hist.Draw('le1p0 same')
 
 ###################
 ## create legend ##
@@ -324,7 +421,7 @@ leg.AddEntry(allHist['nominal'][1], 't#bar{t}', 'f')
 leg.AddEntry(allHist['nominal'][0], 'Diboson', 'f')
 leg.AddEntry(stat, 'Background Stat. Uncertainty', 'f')
 leg.AddEntry(final_err, 'Total Uncertainty', 'f')
-leg.AddEntry(sig_hist, 'Bprime Mass 1200 GeV', 'l')
+leg.AddEntry(sig_hist, 'Bprime Mass 1000 GeV', 'l')
 leg.AddEntry('', 'Signal cross section x10', '')
 leg.Draw()
 
@@ -364,33 +461,26 @@ pull.GetYaxis().SetTitleOffset(.32)
 pull.GetYaxis().SetLabelSize(.17)
 pull.GetYaxis().SetNdivisions(505)
 
-left, right = 0, 0
-if  'Reco' in var:
-    left = 0
-    right = 2500    
-    rightline = right
-    if 'dil' in lepton:
-        left = 102
-        right = 1638
-        rightline = right
+left = 1000
+right = 4000
+if 'dil' in options.lepton:
+    rightline = right+800
 else:
-    left = 1000
-    right = 4000
     rightline = right
 
-pull.GetXaxis().SetRangeUser(left, right)
+pull.GetXaxis().SetRangeUser(left, rightline)
 pull.Draw('hist')
 
 ############################
 ## draw +/- 2 sigma lines ##
 ############################ 
-line1 = TLine(left, 2., rightline+1000, 2.)
+line1 = TLine(left, 2., rightline, 2.)
 line1.SetLineWidth(1)
 line1.SetLineStyle(7)
 line1.SetLineColor(kBlack)
 line1.Draw() 
 
-line2 = TLine(left, -2., rightline+1000, -2.)
+line2 = TLine(left, -2., rightline, -2.)
 line2.SetLineWidth(1)
 line2.SetLineStyle(7)
 line2.SetLineColor(kBlack)
@@ -431,4 +521,4 @@ prel.DrawLatex(0.29,0.80,"Preliminary")
 ################
 ## output pdf ##
 ################
-can.SaveAs(lepton+'_'+var+'.pdf')
+can.SaveAs(lepton+'_'+var+'_prefit.pdf')
